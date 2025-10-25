@@ -2,7 +2,8 @@
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="ExposureShield API", version="0.1.0")
+
+VERSION = "0.1.2"
 
 origins = [
     "http://localhost:4173",
@@ -67,8 +68,7 @@ except Exception:
     except Exception:
         pass
 @app.get("/version")
-def version():
-    return {"service": "exposureshield-api", "version": "0.1.1"}
+def version():\n    return {"service": "exposureshield-api", "version": VERSION}
 import logging
 logger = logging.getLogger("uvicorn.error")
 
@@ -86,8 +86,8 @@ def scan(payload: ScanIn):\n    logger.info(f"scan {payload.email}")
         "advice": ["Use a password manager.","Keep 2FA enabled."],
     }
 @app.get("/version")
-def version():
-    return {"service": "exposureshield-api", "version": "0.1.1"}
+def version():\n    return {"service": "exposureshield-api", "version": VERSION}
 import logging
 logger = logging.getLogger("uvicorn.error")
+
 
