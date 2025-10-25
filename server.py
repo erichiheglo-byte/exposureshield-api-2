@@ -69,3 +69,19 @@ except Exception:
 @app.get("/version")
 def version():
     return {"service": "exposureshield-api", "version": "0.1.0"}
+import logging
+logger = logging.getLogger("uvicorn.error")
+
+@app.post("/scan", response_model=ScanOut)
+def scan(payload: ScanIn):
+    logger.info(f"scan request for {payload.email}")
+    pwd = payload.password.strip().lower()
+    if pwd in {"pwned","leak","breach"}:
+        return {
+            "result": "success","email": payload.email,"status": "exposure_found",
+            "advice": ["Change this password everywhere.","Turn on 2FA.","Run a new scan after changes."],
+        }
+    return {
+        "result": "success","email": payload.email,"status": "no_exposure",
+        "advice": ["Use a password manager.","Keep 2FA enabled."],
+    }
