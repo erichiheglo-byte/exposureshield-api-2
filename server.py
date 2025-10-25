@@ -2,6 +2,9 @@
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from helpers.pwned import pwned_password_count
+from helpers.ihavepwned import load_dataset, lookup_email
+
 
 VERSION = "0.1.2"
 
@@ -34,60 +37,78 @@ class ScanOut(BaseModel):
     advice: list[str] | None = None
 
 @app.post("/scan", response_model=ScanOut)
-def scan(payload: ScanIn):\n    logger.info(f"scan {payload.email}")
-    pwd = payload.password.strip().lower()
-    if pwd in {"pwned","leak","breach"}:
-        return {
-            "result": "success",
-            "email": payload.email,
-            "status": "exposure_found",
-            "advice": [
-                "Change this password everywhere you used it.",
-                "Turn on 2FA.",
-                "Run a new scan after changes.",
-            ],
-        }
+async def scan(payload: ScanIn):
+    email = payload.email.strip()
+    password = payload.password
+
+    # 1) Pwned Passwords (k-anonymity)
+    try:
+        count = await pwned_password_count(password)
+    except Exception:
+        count = 0
+
+    # 2) Local "ihavepwned" dataset
+    matches = lookup_email(email)
+    exposed = bool(matches) or count > 0
+
+    advice = []
+    if count > 0:
+        advice.append(f"Your password appears in {count:,} breaches (Pwned Passwords). Change it everywhere you reused it.")
+    if matches:
+        advice.append(f"Email found in {len(matches)} local exposure record(s). Review your accounts and enable 2FA.")
+    if not advice:
+        advice = [
+            "Use a password manager and unique passwords.",
+            "Keep 2FA enabled on important accounts.",
+        ]
+
     return {
         "result": "success",
-        "email": payload.email,
-        "status": "no_exposure",
-        "advice": [
-            "Use a password manager and unique passwords.",
-            "Keep 2FA enabled.",
-        ],
+        "email": email,
+        "status": "exposure_found" if exposed else "no_exposure",
+        "advice": advice
     }
-
-# Optional: keep your /admin/* if an admin router exists; silently skip otherwise
-try:
-    from admin import router as admin_router
-    app.include_router(admin_router, prefix="/admin")
-except Exception:
-    try:
-        from app.admin import router as admin_router
-        app.include_router(admin_router, prefix="/admin")
-    except Exception:
-        pass
 @app.get("/version")
 def version():\n    return {"service": "exposureshield-api", "version": VERSION}
 import logging
 logger = logging.getLogger("uvicorn.error")
 
 @app.post("/scan", response_model=ScanOut)
-def scan(payload: ScanIn):\n    logger.info(f"scan {payload.email}")
-    logger.info(f"scan request for {payload.email}")
-    pwd = payload.password.strip().lower()
-    if pwd in {"pwned","leak","breach"}:
-        return {
-            "result": "success","email": payload.email,"status": "exposure_found",
-            "advice": ["Change this password everywhere.","Turn on 2FA.","Run a new scan after changes."],
-        }
+async def scan(payload: ScanIn):
+    email = payload.email.strip()
+    password = payload.password
+
+    # 1) Pwned Passwords (k-anonymity)
+    try:
+        count = await pwned_password_count(password)
+    except Exception:
+        count = 0
+
+    # 2) Local "ihavepwned" dataset
+    matches = lookup_email(email)
+    exposed = bool(matches) or count > 0
+
+    advice = []
+    if count > 0:
+        advice.append(f"Your password appears in {count:,} breaches (Pwned Passwords). Change it everywhere you reused it.")
+    if matches:
+        advice.append(f"Email found in {len(matches)} local exposure record(s). Review your accounts and enable 2FA.")
+    if not advice:
+        advice = [
+            "Use a password manager and unique passwords.",
+            "Keep 2FA enabled on important accounts.",
+        ]
+
     return {
-        "result": "success","email": payload.email,"status": "no_exposure",
-        "advice": ["Use a password manager.","Keep 2FA enabled."],
+        "result": "success",
+        "email": email,
+        "status": "exposure_found" if exposed else "no_exposure",
+        "advice": advice
     }
 @app.get("/version")
 def version():\n    return {"service": "exposureshield-api", "version": VERSION}
 import logging
 logger = logging.getLogger("uvicorn.error")
+
 
 
