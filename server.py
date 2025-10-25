@@ -66,3 +66,6 @@ except Exception:
         app.include_router(admin_router, prefix="/admin")
     except Exception:
         pass
+@app.get("/version")
+def version():
+    return {"service": "exposureshield-api", "version": "0.1.0"}
