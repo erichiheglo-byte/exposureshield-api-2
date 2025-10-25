@@ -1,0 +1,6 @@
+﻿{
+  "breaches": [
+    { "email": "eric.hiheglo@gmail.com", "source": "legacy_dump", "first_seen": "2023-08-01", "fields": ["email"] },
+    { "email": "someone@example.com", "source": "combo_list",   "first_seen": "2022-12-10", "fields": ["email","password_hash"] }
+  ]
+}
