@@ -31,11 +31,12 @@ class ScanIn(BaseModel):
     password: str
 
 class ScanOut(BaseModel):
-    result: str
+    result: str                  # "success"
     email: str
-    status: str
-    advice: list[str] | None = None
-
+    status: str                  # "no_exposure" | "exposure_found"
+    advice: Optional[List[str]] = None
+    pwned_count: Optional[int] = None
+    dataset_matches: Optional[int] = None
 @app.post("/scan", response_model=ScanOut)
 async def scan(payload: ScanIn):
     email = payload.email.strip()
@@ -109,6 +110,7 @@ async def scan(payload: ScanIn):
 def version():\n    return {"service": "exposureshield-api", "version": VERSION}
 import logging
 logger = logging.getLogger("uvicorn.error")
+
 
 
 
