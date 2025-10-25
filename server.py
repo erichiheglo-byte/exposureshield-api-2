@@ -33,7 +33,7 @@ class ScanOut(BaseModel):
     advice: list[str] | None = None
 
 @app.post("/scan", response_model=ScanOut)
-def scan(payload: ScanIn):
+def scan(payload: ScanIn):\n    logger.info(f"scan {payload.email}")
     pwd = payload.password.strip().lower()
     if pwd in {"pwned","leak","breach"}:
         return {
@@ -68,12 +68,12 @@ except Exception:
         pass
 @app.get("/version")
 def version():
-    return {"service": "exposureshield-api", "version": "0.1.0"}
+    return {"service": "exposureshield-api", "version": "0.1.1"}
 import logging
 logger = logging.getLogger("uvicorn.error")
 
 @app.post("/scan", response_model=ScanOut)
-def scan(payload: ScanIn):
+def scan(payload: ScanIn):\n    logger.info(f"scan {payload.email}")
     logger.info(f"scan request for {payload.email}")
     pwd = payload.password.strip().lower()
     if pwd in {"pwned","leak","breach"}:
@@ -87,4 +87,7 @@ def scan(payload: ScanIn):
     }
 @app.get("/version")
 def version():
-    return {"service": "exposureshield-api", "version": "0.1.0"}
+    return {"service": "exposureshield-api", "version": "0.1.1"}
+import logging
+logger = logging.getLogger("uvicorn.error")
+
