@@ -2,6 +2,8 @@
 import httpx
 
 PP_API = "https://api.pwnedpasswords.com/range/{prefix}"
+_CACHE = {}  # prefix -> (expires_epoch, text)
+_TTL = 600  # seconds
 
 async def pwned_password_count(password: str) -> int:
     # SHA1
@@ -19,3 +21,4 @@ async def pwned_password_count(password: str) -> int:
             except ValueError:
                 continue
     return 0
+
