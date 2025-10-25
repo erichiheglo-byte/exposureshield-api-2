@@ -85,3 +85,6 @@ def scan(payload: ScanIn):
         "result": "success","email": payload.email,"status": "no_exposure",
         "advice": ["Use a password manager.","Keep 2FA enabled."],
     }
+@app.get("/version")
+def version():
+    return {"service": "exposureshield-api", "version": "0.1.0"}
