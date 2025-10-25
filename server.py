@@ -18,7 +18,6 @@ app.add_middleware(
     allow_credentials=False,
 )
 
-# ---- Public endpoints (frontend expects these) ----
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "exposureshield-api"}
@@ -28,9 +27,9 @@ class ScanIn(BaseModel):
     password: str
 
 class ScanOut(BaseModel):
-    result: str                  # "success"
+    result: str
     email: str
-    status: str                  # "no_exposure" | "exposure_found"
+    status: str
     advice: list[str] | None = None
 
 @app.post("/scan", response_model=ScanOut)
@@ -43,7 +42,7 @@ def scan(payload: ScanIn):
             "status": "exposure_found",
             "advice": [
                 "Change this password everywhere you used it.",
-                "Turn on 2FA for your important accounts.",
+                "Turn on 2FA.",
                 "Run a new scan after changes.",
             ],
         }
@@ -53,13 +52,12 @@ def scan(payload: ScanIn):
         "status": "no_exposure",
         "advice": [
             "Use a password manager and unique passwords.",
-            "Keep 2FA enabled on email and banking.",
+            "Keep 2FA enabled.",
         ],
     }
 
-# ---- OPTIONAL: mount your existing admin router at /admin if present ----
+# Optional: keep your /admin/* if an admin router exists; silently skip otherwise
 try:
-    # Try common module names; ignore if not found
     from admin import router as admin_router
     app.include_router(admin_router, prefix="/admin")
 except Exception:
