@@ -50,13 +50,14 @@ class ScanIn(BaseModel):
     password: str
 
 class ScanOut(BaseModel):
-    result: str                   # "success"
+    result: str
     email: str
-    status: str                   # "no_exposure" | "exposure_found"
+    status: str
     advice: Optional[List[str]] = None
     pwned_count: Optional[int] = None
     dataset_matches: Optional[int] = None
-
+    hibp_breaches_count: Optional[int] = None
+    hibp_breaches: Optional[List[str]] = None
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "exposureshield-api"}
@@ -101,7 +102,7 @@ async def scan(payload: ScanIn):
         "status": "exposure_found" if exposed else "no_exposure",
         "advice": advice,
         "pwned_count": int(count or 0),
-        "dataset_matches": len(matches),
+        "dataset_matches": len(matches), "hibp_breaches_count": (len(hb) if hb else 0), "hibp_breaches": ([b.get("Name") for b in hb][:5] if hb else None),
     }
 
 # Keep /admin/* if you have it; ignore if not present
@@ -114,3 +115,4 @@ except Exception:
         app.include_router(admin_router, prefix="/admin")
     except Exception:
         pass
+
