@@ -11,6 +11,7 @@ from pydantic import BaseModel
 try:
     from helpers.pwned import pwned_password_count
     from helpers.ihavepwned import load_dataset, lookup_email
+from helpers.hibp import hibp_breaches
 except Exception:
     # Fallback no-op implementations so app still starts
     async def pwned_password_count(password: str) -> int:
@@ -58,10 +59,6 @@ class ScanOut(BaseModel):
     dataset_matches: Optional[int] = None
     hibp_breaches_count: Optional[int] = None
     hibp_breaches: Optional[List[str]] = None
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "exposureshield-api"}
-
 @app.get("/version")
 def version():
     return {"service": "exposureshield-api", "version": VERSION}
@@ -80,17 +77,26 @@ async def scan(payload: ScanIn):
     # 2) Local "ihavepwned" dataset
     try:
         matches = list(lookup_email(email)) or []
+    # HIBP email lookup (optional; requires HIBP_API_KEY)
+    try:
+        hb = await hibp_breaches(email)
+    except Exception:
+        hb = []
     except Exception:
         matches = []
 
-    exposed = bool(matches) or (count and count > 0)
+    exposed = bool(matches) or (count and count > 0) or bool(hb)
 
     advice: List[str] = []
     if count and count > 0:
         advice.append(f"Your password appears in {count:,} breaches (Pwned Passwords). Change it everywhere you reused it.")
     if matches:
         advice.append(f"Email found in {len(matches)} local exposure record(s). Review your accounts and enable 2FA.")
-    if not advice:
+    
+    if hb:
+        names = ", ".join([str(b.get("Name")) for b in hb[:5]])
+        advice.append(f"Email found in {len(hb)} public breach(es) via HIBP: {names}. Change passwords and enable 2FA.")
+if not advice:
         advice = [
             "Use a password manager and unique passwords.",
             "Keep 2FA enabled on important accounts.",
@@ -102,7 +108,7 @@ async def scan(payload: ScanIn):
         "status": "exposure_found" if exposed else "no_exposure",
         "advice": advice,
         "pwned_count": int(count or 0),
-        "dataset_matches": len(matches), "hibp_breaches_count": (len(hb) if hb else 0), "hibp_breaches": ([b.get("Name") for b in hb][:5] if hb else None),
+        "dataset_matches": len(matches), "hibp_breaches_count": (len(hb) if hb else 0), "hibp_breaches": ([b.get("Name") for b in hb][:5] if hb else None), "hibp_breaches_count": (len(hb) if hb else 0), "hibp_breaches": ([b.get("Name") for b in hb][:5] if hb else None),
     }
 
 # Keep /admin/* if you have it; ignore if not present
@@ -115,4 +121,5 @@ except Exception:
         app.include_router(admin_router, prefix="/admin")
     except Exception:
         pass
+
 
