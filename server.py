@@ -34,6 +34,13 @@ app = FastAPI(title="ExposureShield API", version=VERSION)
 origins = [
     "http://localhost:4173",
     "http://localhost:5173",
+    "https://exposureshield.com",
+    "https://www.exposureshield.com",
+    "https://exposureshield-demo.vercel.app"
+]
+origins = [
+    "http://localhost:4173",
+    "http://localhost:5173",
     "https://exposureshield.vercel.app",
     "https://www.exposureshield.com",
 ]
@@ -41,53 +48,11 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origin_regex=r"https://.*\.vercel\.app$",
+    allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
-)
-
-# Load local dataset on startup (ignore errors)
-try:
-    load_dataset()
-except Exception:
-    pass
-
-class ScanIn(BaseModel):
-    email: str
-    password: str
-
-class ScanOut(BaseModel):
-    result: str
-    email: str
-    status: str                         # "no_exposure" | "exposure_found"
-    advice: Optional[List[str]] = None
-    pwned_count: Optional[int] = None
-    dataset_matches: Optional[int] = None
-    hibp_breaches_count: Optional[int] = None
-    hibp_breaches: Optional[List[str]] = None
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "exposureshield-api"}
-
-@app.get("/version")
-def version():
-    return {"service": "exposureshield-api", "version": VERSION}
-
-@app.post("/scan", response_model=ScanOut)
-async def scan(payload: ScanIn):
-    email = payload.email.strip()
-    password = payload.password
-
-    # 1) Pwned Passwords (k-anonymity; no API key needed)
-    try:
-        count = await pwned_password_count(password)
-    except Exception:
-        count = 0
-
-    # 2) Local "ihavepwned" dataset (JSON/CSV via helper)
-    try:
-        matches = list(lookup_email(email)) or []
+) or []
     except Exception:
         matches = []
 
@@ -126,3 +91,4 @@ async def scan(payload: ScanIn):
 @app.get("/feedback/captcha")
 def fake_captcha(easy: int | None = None):
     return {"ok": True, "easy": bool(easy)}
+
