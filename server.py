@@ -5,9 +5,21 @@ from typing import List, Optional, Literal
 import os
 import time
 
-app = FastAPI(title="exposureshield-api", version="0.1.0")
+app = FastAPI()
 
-# --- CORS ---
+# CORS — allow production frontends
+origins = [
+    "https://www.exposureshield.com",
+    "https://exposureshield.com",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app$",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)# --- CORS ---
 origins = [
     "http://localhost:4173",
     "http://localhost:5173",
@@ -111,3 +123,4 @@ def scan(body: ScanIn):
 async def feedback_submit(data: FeedbackIn):
     print("[feedback]", {"email": data.email, "len": len(data.message)})
     return FeedbackOut(ok=True)
+
