@@ -138,3 +138,4 @@ async def feedback_submit(data: FeedbackIn):
     # TODO: store feedback (DB/email). For now just log.
     print("[feedback]", {"email": data.email, "message": data.message, "used": used})
     return FeedbackOut(ok=True, used=used)
+
