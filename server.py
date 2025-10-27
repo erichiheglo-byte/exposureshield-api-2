@@ -1,4 +1,6 @@
-﻿import os, sys
+﻿import secrets
+import time
+import os, sys
 sys.path.append(os.path.dirname(__file__))
 
 from typing import List, Optional
@@ -31,7 +33,15 @@ VERSION = "0.1.3"
 
 app = FastAPI(title="ExposureShield API", version=VERSION)
 
+
 origins = [
+    "http://localhost:4173",
+    "http://localhost:5173",
+    "https://exposureshield.com",
+    "https://www.exposureshield.com",
+    # Your Vercel deploys:
+    "https://exposureshield-demo.vercel.app"
+]origins = [
     "http://localhost:4173",
     "http://localhost:5173",
     "https://exposureshield.com",
@@ -52,25 +62,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
-) or []
-    except Exception:
-        matches = []
-
-    # 3) HIBP breaches for the email (optional; requires HIBP_API_KEY)
-    try:
-        hb = await hibp_breaches(email)
-    except Exception:
-        hb = []
-
-    exposed = bool(matches) or (count and count > 0) or bool(hb)
-
-    advice: List[str] = []
-    if count and count > 0:
-        advice.append(f"Your password appears in {count:,} breaches (Pwned Passwords). Change it everywhere you reused it.")
-    if matches:
-        advice.append(f"Email found in {len(matches)} local exposure record(s). Review your accounts and enable 2FA.")
-    if hb:
-        names = ", ".join([str(b.get("Name")) for b in hb[:5]])
+) for b in hb[:5]])
         advice.append(f"Email found in {len(hb)} public breach(es) via HIBP: {names}. Change passwords and enable 2FA.")
     if not advice:
         advice = [
@@ -92,3 +84,57 @@ app.add_middleware(
 def fake_captcha(easy: int | None = None):
     return {"ok": True, "easy": bool(easy)}
 
+
+from helpers.turnstile import verify_turnstile
+_MATH = {}
+def _math_new():
+    cid = secrets.token_hex(8)
+    a = secrets.randbelow(8) + 2
+    b = secrets.randbelow(8) + 2
+    _MATH[cid] = {"ans": a + b, "ts": time.time()}
+    return cid, a, b
+
+def _math_check(cid: str, ans: int) -> bool:
+    rec = _MATH.pop(cid, None)
+    if not rec: return False
+    # 5 min expiry
+    if time.time() - rec["ts"] > 300: return False
+    return int(ans) == int(rec["ans"])
+class FeedbackIn(BaseModel):
+    message: str
+    email: str | None = None
+    turnstile_token: str | None = None
+    math_challenge_id: str | None = None
+    math_answer: int | None = None
+
+class FeedbackOut(BaseModel):
+    ok: bool
+    used: str
+
+@app.get("/feedback/captcha")
+def feedback_captcha():
+    cid, a, b = _math_new()
+    return {"id": cid, "prompt": f"{a} + {b} = ?"}
+
+@app.post("/feedback", response_model=FeedbackOut)
+async def feedback_submit(data: FeedbackIn):
+    # Prefer Turnstile if token + secret available
+    client_ok = False
+    used = "none"
+    if data.turnstile_token:
+        # remote ip not required; could use X-Forwarded-For
+        if await verify_turnstile(data.turnstile_token, None):
+            client_ok = True
+            used = "turnstile"
+    if not client_ok:
+        # fallback to math
+        if data.math_challenge_id and data.math_answer is not None:
+            if _math_check(data.math_challenge_id, data.math_answer):
+                client_ok = True
+                used = "math"
+    if not client_ok:
+        return FeedbackOut(ok=False, used=used)
+
+    # TODO: store feedback (DB/email). For now just log.
+    print("[feedback]", {"email": data.email, "message": data.message, "used": used})
+    return FeedbackOut(ok=True, used=used)
