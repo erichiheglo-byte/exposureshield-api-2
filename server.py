@@ -8,10 +8,7 @@ import time
 app = FastAPI()
 
 # CORS — allow production frontends
-origins = [
-    "https://www.exposureshield.com",
-    "https://exposureshield.com",
-]
+origins = ["https://exposureshield.com","https://www.exposureshield.com"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -20,13 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=False,
 )# --- CORS ---
-origins = [
-    "http://localhost:4173",
-    "http://localhost:5173",
-    "https://exposureshield.com",
-    "https://www.exposureshield.com",
-    "https://exposureshield-demo.vercel.app",
-]
+origins = ["https://exposureshield.com","https://www.exposureshield.com"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -123,4 +114,5 @@ def scan(body: ScanIn):
 async def feedback_submit(data: FeedbackIn):
     print("[feedback]", {"email": data.email, "len": len(data.message)})
     return FeedbackOut(ok=True)
+
 
