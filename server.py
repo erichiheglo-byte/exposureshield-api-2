@@ -1,60 +1,20 @@
-﻿import secrets
-import time
-import os, sys
-sys.path.append(os.path.dirname(__file__))
-
-from typing import List, Optional
-from fastapi import FastAPI
+﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional, Literal
+import os
+import time
 
-# --- Helpers (each has safe fallback so app always starts) ---
-try:
-    from helpers.pwned import pwned_password_count
-except Exception:
-    async def pwned_password_count(password: str) -> int:
-        return 0
+app = FastAPI(title="exposureshield-api", version="0.1.0")
 
-try:
-    from helpers.ihavepwned import load_dataset, lookup_email
-except Exception:
-    def load_dataset() -> None:  # type: ignore
-        pass
-    def lookup_email(email: str):  # type: ignore
-        return []
-
-try:
-    from helpers.hibp import hibp_breaches
-except Exception:
-    async def hibp_breaches(email: str):
-        return []
-
-VERSION = "0.1.3"
-
-app = FastAPI(title="ExposureShield API", version=VERSION)
-
-
+# --- CORS ---
 origins = [
     "http://localhost:4173",
     "http://localhost:5173",
     "https://exposureshield.com",
     "https://www.exposureshield.com",
-    # Your Vercel deploys:
-    "https://exposureshield-demo.vercel.app"
-]origins = [
-    "http://localhost:4173",
-    "http://localhost:5173",
-    "https://exposureshield.com",
-    "https://www.exposureshield.com",
-    "https://exposureshield-demo.vercel.app"
+    "https://exposureshield-demo.vercel.app",
 ]
-origins = [
-    "http://localhost:4173",
-    "http://localhost:5173",
-    "https://exposureshield.vercel.app",
-    "https://www.exposureshield.com",
-]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -62,80 +22,92 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
-) for b in hb[:5]])
-        advice.append(f"Email found in {len(hb)} public breach(es) via HIBP: {names}. Change passwords and enable 2FA.")
-    if not advice:
-        advice = [
-            "Use a password manager and unique passwords.",
-            "Keep 2FA enabled on important accounts.",
-        ]
+)
+# --- end CORS ---
 
-    return {
-        "result": "success",
-        "email": email,
-        "status": "exposure_found" if exposed else "no_exposure",
-        "advice": advice,
-        "pwned_count": int(count or 0),
-        "dataset_matches": len(matches),
-        "hibp_breaches_count": (len(hb) if hb else 0),
-        "hibp_breaches": ([b.get("Name") for b in hb][:5] if hb else None),
-    }
-@app.get("/feedback/captcha")
-def fake_captcha(easy: int | None = None):
-    return {"ok": True, "easy": bool(easy)}
+# --- Models ---
+ResultLiteral = Literal["success", "error"]
+StatusLiteral = Literal["no_exposure", "exposure_found", "error", "loading", "idle"]
 
+class ScanIn(BaseModel):
+    email: str
+    password: str
 
-from helpers.turnstile import verify_turnstile
-_MATH = {}
-def _math_new():
-    cid = secrets.token_hex(8)
-    a = secrets.randbelow(8) + 2
-    b = secrets.randbelow(8) + 2
-    _MATH[cid] = {"ans": a + b, "ts": time.time()}
-    return cid, a, b
+class ScanOut(BaseModel):
+    result: ResultLiteral
+    email: str
+    status: StatusLiteral
+    advice: List[str]
+    # optional extras expected by UI
+    pwned_count: Optional[int] = None
+    dataset_matches: Optional[int] = None
+    hibp_breaches_count: Optional[int] = None
+    hibp_breaches: Optional[List[str]] = None
 
-def _math_check(cid: str, ans: int) -> bool:
-    rec = _MATH.pop(cid, None)
-    if not rec: return False
-    # 5 min expiry
-    if time.time() - rec["ts"] > 300: return False
-    return int(ans) == int(rec["ans"])
 class FeedbackIn(BaseModel):
     message: str
-    email: str | None = None
-    turnstile_token: str | None = None
-    math_challenge_id: str | None = None
-    math_answer: int | None = None
+    email: Optional[str] = None
 
 class FeedbackOut(BaseModel):
     ok: bool
-    used: str
 
-@app.get("/feedback/captcha")
-def feedback_captcha():
-    cid, a, b = _math_new()
-    return {"id": cid, "prompt": f"{a} + {b} = ?"}
+# --- Basic endpoints ---
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "exposureshield-api", "store": "sqlite"}
 
+@app.get("/")
+def root():
+    return {"ok": True, "service": "exposureshield-api"}
+
+@app.get("/version")
+def version():
+    return {"service": "exposureshield-api", "version": app.version}
+
+# --- /scan (simple demo logic; replace with real helpers later) ---
+@app.post("/scan", response_model=ScanOut)
+def scan(body: ScanIn):
+    email = body.email.strip().lower()
+    pw = body.password or ""
+
+    advice: List[str] = [
+        "Use a password manager and unique passwords.",
+        "Keep 2FA enabled.",
+    ]
+
+    # Very simple demo heuristic to unblock the UI:
+    if len(pw) < 8 or pw.lower() in {"password", "12345678", "qwerty"}:
+        # pretend exposure found
+        out = ScanOut(
+            result="success",
+            email=email,
+            status="exposure_found",
+            advice=[
+                "Your password is weak or common. Change it everywhere.",
+                "Enable 2FA on important accounts.",
+            ],
+            pwned_count=1654698,
+            dataset_matches=0,
+            hibp_breaches_count=3,
+            hibp_breaches=["Adobe", "Gawker", "Yahoo"],
+        )
+        return out
+
+    # otherwise, no exposure (demo)
+    out = ScanOut(
+        result="success",
+        email=email,
+        status="no_exposure",
+        advice=advice,
+        pwned_count=0,
+        dataset_matches=0,
+        hibp_breaches_count=0,
+        hibp_breaches=[],
+    )
+    return out
+
+# --- /feedback (no captcha) ---
 @app.post("/feedback", response_model=FeedbackOut)
 async def feedback_submit(data: FeedbackIn):
-    # Prefer Turnstile if token + secret available
-    client_ok = False
-    used = "none"
-    if data.turnstile_token:
-        # remote ip not required; could use X-Forwarded-For
-        if await verify_turnstile(data.turnstile_token, None):
-            client_ok = True
-            used = "turnstile"
-    if not client_ok:
-        # fallback to math
-        if data.math_challenge_id and data.math_answer is not None:
-            if _math_check(data.math_challenge_id, data.math_answer):
-                client_ok = True
-                used = "math"
-    if not client_ok:
-        return FeedbackOut(ok=False, used=used)
-
-    # TODO: store feedback (DB/email). For now just log.
-    print("[feedback]", {"email": data.email, "message": data.message, "used": used})
-    return FeedbackOut(ok=True, used=used)
-
+    print("[feedback]", {"email": data.email, "len": len(data.message)})
+    return FeedbackOut(ok=True)
