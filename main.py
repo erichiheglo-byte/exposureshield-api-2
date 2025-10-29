@@ -1,57 +1,46 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import os
 
-app = FastAPI()
+VERSION = os.getenv("APP_VERSION", "v0.4.0")
+app = FastAPI(title="exposureshield-api", version=VERSION)
 
+# Allow dev, your prod Vercel URL, and your domains
 origins = [
-    "http://localhost:4173",
+    "http://localhost:5173",
+    "https://frontend-qhoh2jc3i-erics-projects-c7eb48f7.vercel.app",
+    "https://exposureshield.com",
     "https://www.exposureshield.com",
-    "https://exposureshield.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_methods=["GET","POST","OPTIONS"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["*"],     # includes OPTIONS for preflight
     allow_headers=["*"],
-    allow_credentials=False,
 )
+
+@app.get("/")
+def root():
+    return {"service":"exposureshield-api","version":VERSION}
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "exposureshield-api"}
+    return {"status":"ok","service":"exposureshield-api","store":"sqlite","version":VERSION}
 
-class ScanIn(BaseModel):
+class ScanBody(BaseModel):
     email: str
     password: str
 
-class ScanOut(BaseModel):
-    result: str                 # "success"
-    email: str
-    status: str                 # "no_exposure" | "exposure_found"
-    advice: list[str] | None = None
-
-@app.post("/scan", response_model=ScanOut)
-def scan(payload: ScanIn):
-    pwd = payload.password.strip().lower()
-    if pwd in {"pwned","leak","breach"}:
-        return {
-            "result": "success",
-            "email": payload.email,
-            "status": "exposure_found",
-            "advice": [
-                "Change this password everywhere you used it.",
-                "Turn on 2FA for your important accounts.",
-                "Run a new scan after changes.",
-            ],
-        }
+@app.post("/scan")
+def scan(body: ScanBody):
+    # demo response; replace with real logic later
     return {
         "result": "success",
-        "email": payload.email,
-        "status": "no_exposure",
-        "advice": [
-            "Use a password manager and unique passwords.",
-            "Keep 2FA enabled on email and banking.",
-        ],
+        "email": body.email,
+        "status": "exposure_found",
+        "breaches": [{"site":"deezer.com","date":"2019-04-22"}]
     }
