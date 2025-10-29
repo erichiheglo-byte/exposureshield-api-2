@@ -1,0 +1,66 @@
+﻿from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+app = FastAPI()
+
+# ✅ Allow both local development and production URLs
+allowed_origins = [
+    "http://localhost:5173",              # Vite dev server
+    "http://127.0.0.1:5173",              # alternative local
+    "http://localhost:4173",              # preview build
+    "https://www.exposureshield.com",     # production site
+    "https://exposureshield.com",         # root domain
+    "https://scanner-frontend-opal.vercel.app",  # Vercel preview
+]
+
+# ✅ Proper CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],       # allow GET, POST, OPTIONS, etc.
+    allow_headers=["*"],       # allow all headers
+)
+
+# ✅ Health check route
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "exposureshield-api", "store": "sqlite"}
+
+# ✅ Input model
+class ScanIn(BaseModel):
+    email: str
+    password: str
+
+# ✅ Output model
+class ScanOut(BaseModel):
+    result: str                 # "success"
+    email: str
+    status: str                 # "no_exposure" | "exposure_found"
+    advice: list[str] | None = None
+
+# ✅ Main route for scan
+@app.post("/scan", response_model=ScanOut)
+def scan(payload: ScanIn):
+    pwd = payload.password.strip().lower()
+    if pwd in {"pwned", "leak", "breach"}:
+        return {
+            "result": "success",
+            "email": payload.email,
+            "status": "exposure_found",
+            "advice": [
+                "Change this password everywhere you used it.",
+                "Turn on 2FA for your important accounts.",
+                "Run a new scan after changes.",
+            ],
+        }
+    return {
+        "result": "success",
+        "email": payload.email,
+        "status": "no_exposure",
+        "advice": [
+            "Use a password manager and unique passwords.",
+            "Keep 2FA enabled on email and banking.",
+        ],
+    }

@@ -1,0 +1,190 @@
+﻿from __future__ import annotations
+import os
+import time
+import smtplib
+import socket
+from email.message import EmailMessage
+from typing import Dict, Tuple, List
+
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr
+
+VERSION = "0.2.0"
+
+app = FastAPI(title="ExposureShield API", version=VERSION)
+
+# --- CORS ---
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "https://www.exposureshield.com",
+    "https://exposureshield.com",
+    "https://scanner-frontend-opal.vercel.app",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Models ---
+class ScanIn(BaseModel):
+    email: EmailStr
+    password: str
+
+class ScanOut(BaseModel):
+    result: str
+    email: EmailStr
+    status: str
+    advice: List[str] | None = None
+
+class HIBPOut(BaseModel):
+    source: str = "hibp"
+    breaches: List[dict]
+
+class ContactIn(BaseModel):
+    name: str
+    email: EmailStr
+    message: str
+
+class ContactOut(BaseModel):
+    ok: bool
+    sent_to: str
+
+# --- Health ---
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "exposureshield-api", "store": "sqlite", "version": VERSION}
+
+# --- Demo scan ---
+@app.post("/scan", response_model=ScanOut)
+def scan(payload: ScanIn):
+    pwd = payload.password.strip().lower()
+    if pwd in {"pwned", "leak", "breach"}:
+        return {
+            "result": "success",
+            "email": payload.email,
+            "status": "exposure_found",
+            "advice": [
+                "Change this password everywhere you used it.",
+                "Turn on 2FA for your important accounts.",
+                "Run a new scan after changes.",
+            ],
+        }
+    return {
+        "result": "success",
+        "email": payload.email,
+        "status": "no_exposure",
+        "advice": [
+            "Use a password manager and unique passwords.",
+            "Keep 2FA enabled on email and banking.",
+        ],
+    }
+
+# ============================
+#      HIBP Integration
+# ============================
+_HIBP_CACHE: Dict[str, Tuple[float, List[dict]]] = {}
+_HIBP_TTL = int(os.getenv("HIBP_TTL_SECONDS") or "600")  # 10 minutes
+_HIBP_API_KEY = os.getenv("HIBP_API_KEY")  # set via env
+
+def _hibp_headers() -> dict:
+    if not _HIBP_API_KEY:
+        raise HTTPException(status_code=501, detail="HIBP not configured (set HIBP_API_KEY).")
+    return {
+        "hibp-api-key": _HIBP_API_KEY,
+        "user-agent": f"ExposureShield/{VERSION} (contact@exposureshield.com)",
+    }
+
+def _fetch_hibp(email: str) -> List[dict]:
+    url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
+    params = {"truncateResponse": "false", "includeUnverified": "false"}
+    try:
+        r = requests.get(url, headers=_hibp_headers(), params=params, timeout=10)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"HIBP network error: {e}")
+
+    if r.status_code == 404:
+        return []
+    if r.status_code == 200:
+        try:
+            return r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail="HIBP returned invalid JSON")
+    if r.status_code == 401:
+        raise HTTPException(status_code=502, detail="HIBP unauthorized (check API key)")
+    if r.status_code == 429:
+        raise HTTPException(status_code=429, detail="HIBP rate limited — try again later")
+    raise HTTPException(status_code=502, detail=f"HIBP error {r.status_code}")
+
+def hibp_lookup(email: str) -> List[dict]:
+    now = time.time()
+    cached = _HIBP_CACHE.get(email)
+    if cached:
+        ts, data = cached
+        if now - ts < _HIBP_TTL:
+            return data
+    data = _fetch_hibp(email)
+    _HIBP_CACHE[email] = (now, data)
+    return data
+
+@app.get("/breaches/{email}", response_model=HIBPOut)
+def breaches(email: EmailStr):
+    breaches = hibp_lookup(email)
+    return {"source": "hibp", "breaches": breaches}
+
+# ============================
+#     Contact Email Endpoint
+# ============================
+def _smtp_config() -> dict:
+    return {
+        "host": os.getenv("MAIL_HOST", ""),
+        "port": int(os.getenv("MAIL_PORT") or "587"),
+        "user": os.getenv("MAIL_USER", ""),
+        "password": os.getenv("MAIL_PASS", ""),
+        "from_addr": os.getenv("MAIL_FROM", "contact@exposureshield.com"),
+        "to_addr": os.getenv("MAIL_TO", "contact@exposureshield.com"),
+        "use_tls": (os.getenv("MAIL_USE_TLS", "true").lower() != "false"),
+    }
+
+def _send_email(subject: str, body: str):
+    cfg = _smtp_config()
+    if not cfg["host"]:
+        raise HTTPException(status_code=501, detail="Mail not configured (set MAIL_HOST...)")
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = cfg["from_addr"]
+    msg["To"] = cfg["to_addr"]
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as s:
+            s.ehlo()
+            if cfg["use_tls"]:
+                s.starttls(); s.ehlo()
+            if cfg["user"]:
+                s.login(cfg["user"], cfg["password"])
+            s.send_message(msg)
+    except (smtplib.SMTPException, socket.error) as e:
+        raise HTTPException(status_code=502, detail=f"SMTP error: {e}")
+
+class ContactIn(BaseModel):
+    name: str
+    email: EmailStr
+    message: str
+
+class ContactOut(BaseModel):
+    ok: bool
+    sent_to: str
+
+@app.post("/contact", response_model=ContactOut)
+def contact(payload: ContactIn):
+    subject = f"[ExposureShield] Contact from {payload.name} <{payload.email}>"
+    body = f"Name: {payload.name}\nEmail: {payload.email}\n\nMessage:\n{payload.message}\n"
+    _send_email(subject, body)
+    return {"ok": True, "sent_to": _smtp_config()["to_addr"]}
