@@ -1,12 +1,19 @@
-﻿__pycache__/
-*.pyc
+﻿# Byte-compiled / cache
+__pycache__/
+*.py[cod]
 *.pyo
 *.pyd
-*.log
+*.pyc
+
+# Virtual env
 .venv/
-env/
 venv/
+
+# OS / Editor
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
+
+# Env files
+.env
+.env.*

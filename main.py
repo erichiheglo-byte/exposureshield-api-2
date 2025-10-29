@@ -6,20 +6,18 @@ import os
 VERSION = os.getenv("APP_VERSION", "v0.4.0")
 app = FastAPI(title="exposureshield-api", version=VERSION)
 
-# Allow local dev, your Vercel prod, and your domains
 origins = [
     "http://localhost:5173",
     "https://frontend-qhoh2jc3i-erics-projects-c7eb48f7.vercel.app",
     "https://exposureshield.com",
     "https://www.exposureshield.com",
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],    # includes OPTIONS
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -37,7 +35,6 @@ class ScanBody(BaseModel):
 
 @app.post("/scan")
 def scan(body: ScanBody):
-    # demo response; replace with real logic later
     return {
         "result": "success",
         "email": body.email,
