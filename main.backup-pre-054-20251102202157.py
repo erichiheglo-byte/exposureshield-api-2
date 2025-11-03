@@ -90,6 +90,7 @@ def verify_email(
             r = _hibp_breachedaccount(email, truncate)
             last = r
             if r.status_code == 429:
+                # Respect rate-limit header if present, else wait a short time
                 wait = r.headers.get("Retry-After")
                 try:
                     wait_s = min(int(wait), 10) if wait is not None else 3
