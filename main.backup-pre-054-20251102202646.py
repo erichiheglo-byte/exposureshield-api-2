@@ -5,10 +5,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+# Ensure .env wins over any stale Windows env var
 load_dotenv(override=True)
 
 app = FastAPI(title="ExposureShield API", version="0.5.4")
 
+# Strict allowlist + regex to permit any *.vercel.app (preview/prod)
 ALLOWED_ORIGINS = [
     "https://www.exposureshield.com",
     "https://exposureshield.com",
