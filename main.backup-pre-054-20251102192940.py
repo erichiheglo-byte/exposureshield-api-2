@@ -1,67 +1,60 @@
-﻿import os
-import time
+﻿import os, time
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Ensure .env wins over any stale Windows env var
 load_dotenv(override=True)
 
-app = FastAPI(title="ExposureShield API", version="0.5.4")
+app = FastAPI(title="ExposureShield API", version="0.5.3")
 
-# Strict allowlist + regex to permit any *.vercel.app (preview/prod)
 ALLOWED_ORIGINS = [
     "https://www.exposureshield.com",
     "https://exposureshield.com",
     "https://api.exposureshield.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"^https://[a-z0-9\-]+\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 HIBP_API = "https://haveibeenpwned.com/api/v3"
+# STRIP in case of hidden whitespace/newlines
+HIBP_KEY = (os.getenv("HIBP_API_KEY") or "").strip()
+HIBP_UA  = (os.getenv("HIBP_USER_AGENT") or "ExposureShield/0.5.3 (contact@exposureshield.com)").strip()
 
-def _get_env_key() -> str:
-    return (os.getenv("HIBP_API_KEY") or "").strip()
-
-def _get_env_ua() -> str:
-    ua = (os.getenv("HIBP_USER_AGENT") or "").strip()
-    return ua if ua else "ExposureShield/0.5.4 (contact@exposureshield.com)"
-
-def hibp_headers() -> dict:
-    key = _get_env_key()
-    if not key:
+def hibp_headers():
+    if not HIBP_KEY:
         raise HTTPException(status_code=500, detail="HIBP API key not configured")
+    # Match your working PowerShell headers (case/canonical)
     return {
-        "hibp-api-key": key,
-        "User-Agent": _get_env_ua(),
+        "hibp-api-key": HIBP_KEY,
+        "User-Agent": HIBP_UA,
         "Accept": "application/json",
     }
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "exposureshield-api", "store": "sqlite", "version": "v0.5.4"}
+    return {"status": "ok", "service": "exposureshield-api", "store": "sqlite", "version": "v0.5.3"}
 
 @app.get("/debug/env")
 def debug_env():
-    key = _get_env_key()
-    return {"has_key": bool(key), "key_len": len(key), "ua": _get_env_ua()}
+    return {"has_key": bool(HIBP_KEY), "key_len": len(HIBP_KEY), "ua": HIBP_UA}
 
 @app.get("/debug/hibp")
 def debug_hibp(email: str, truncate: bool = False):
+    """Call HIBP from the server and show status + first 500 chars of body + headers used."""
     try:
         params = {"truncateResponse": str(truncate).lower()}
         h = hibp_headers()
         r = requests.get(f"{HIBP_API}/breachedaccount/{email}", headers=h, params=params, timeout=20)
         return {
-            "used_headers": {"hibp-api-key": h["hibp-api-key"], "User-Agent": h["User-Agent"], "Accept": h["Accept"]},
+            "used_headers": h,
             "status": r.status_code,
             "retry_after": r.headers.get("Retry-After"),
             "body_preview": r.text[:500],
@@ -71,12 +64,7 @@ def debug_hibp(email: str, truncate: bool = False):
 
 def _hibp_breachedaccount(email: str, truncate: bool) -> requests.Response:
     params = {"truncateResponse": str(truncate).lower()}
-    return requests.get(
-        f"{HIBP_API}/breachedaccount/{email}",
-        headers=hibp_headers(),
-        params=params,
-        timeout=20,
-    )
+    return requests.get(f"{HIBP_API}/breachedaccount/{email}", headers=hibp_headers(), params=params, timeout=20)
 
 @app.get("/verify")
 def verify_email(
@@ -89,16 +77,10 @@ def verify_email(
         try:
             r = _hibp_breachedaccount(email, truncate)
             last = r
-            if r.status_code == 429:
-                # Respect rate-limit header if present, else wait a short time
-                wait = r.headers.get("Retry-After")
-                try:
-                    wait_s = min(int(wait), 10) if wait is not None else 3
-                except ValueError:
-                    wait_s = 3
-                time.sleep(wait_s)
-                continue
-            break
+            if r.status_code != 429:
+                break
+            wait = min(int(r.headers.get("Retry-After", "3")), 10)
+            time.sleep(wait)
         except requests.RequestException as e:
             raise HTTPException(status_code=502, detail=f"HIBP request failed: {e}")
 
@@ -111,6 +93,9 @@ def verify_email(
         raise HTTPException(status_code=401, detail="HIBP unauthorized (check API key)")
     if last.status_code == 403:
         raise HTTPException(status_code=403, detail="HIBP forbidden (check User-Agent or plan)")
+    if last.status_code == 429:
+        ra = last.headers.get("Retry-After", "60")
+        raise HTTPException(status_code=429, detail=f"HIBP rate limited. Retry after {ra}s")
     if last.status_code != 200:
         raise HTTPException(status_code=last.status_code, detail=f"HIBP error ({last.status_code}): {last.text[:200]}")
 
@@ -130,3 +115,5 @@ def verify_email(
     } for b in data]
 
     return {"verified": len(mapped) > 0, "breaches": mapped}
+
+
