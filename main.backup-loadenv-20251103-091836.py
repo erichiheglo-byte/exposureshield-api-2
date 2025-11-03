@@ -1,6 +1,7 @@
 ﻿from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
-import os, time, httpx, sys
+import os, time
+import httpx
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from cachetools import TTLCache
@@ -18,7 +19,7 @@ app = FastAPI()
 APP_VERSION = "v0.5.4"
 START_TS = time.time()
 
-# CORS setup
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://www.exposureshield.com","https://exposureshield.com","http://localhost:5173"],
@@ -27,7 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 5-minute cache
+# Cache: 5 min TTL
 verify_cache = TTLCache(maxsize=100, ttl=300)
 
 @app.get("/health")
@@ -44,21 +45,22 @@ def health():
 @app.get("/verify")
 def verify(email: str = Query(..., min_length=3, max_length=254)):
     if email in verify_cache:
-        return {"verified": bool(verify_cache[email]), "breaches": verify_cache[email]}
+        return {"verified": True if verify_cache[email] else False, "breaches": verify_cache[email]}
 
     if not HIBP_API_KEY:
         raise HTTPException(status_code=500, detail="HIBP key not configured")
 
     url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
-    headers = {"hibp-api-key": HIBP_API_KEY, "User-Agent": USER_AGENT, "Accept": "application/json"}
+    headers = {
+        "hibp-api-key": HIBP_API_KEY,
+        "User-Agent": USER_AGENT,
+    }
 
     try:
         with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
-            r = client.get(url, headers=headers, params={"truncateResponse":"false"})
+            r = client.get(url, headers=headers, params={"truncateResponse": "false"})
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)}")
-
-    print(f"[HIBP] status={r.status_code} body={r.text[:120]}", file=sys.stderr)
 
     if r.status_code == 200:
         data = r.json()
@@ -71,6 +73,6 @@ def verify(email: str = Query(..., min_length=3, max_length=254)):
     elif r.status_code == 429:
         raise HTTPException(status_code=429, detail="Rate limited by HIBP")
     elif r.status_code in (401, 403):
-        raise HTTPException(status_code=502, detail="HIBP authentication failed (check API key/plan).")
+        raise HTTPException(status_code=502, detail="HIBP authentication failed")
     else:
         raise HTTPException(status_code=502, detail=f"HIBP error {r.status_code}")
