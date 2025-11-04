@@ -1,76 +1,167 @@
-﻿from pathlib import Path
-from dotenv import load_dotenv, find_dotenv
-import os, time, httpx, sys
-from fastapi import FastAPI, Query, HTTPException
+﻿from __future__ import annotations
+
+from typing import Optional, Dict, Deque, List
+from collections import deque
+from datetime import datetime, timedelta
+import hmac, hashlib, os
+
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from cachetools import TTLCache
+from pydantic import BaseModel, EmailStr
+from starlette.responses import JSONResponse, Response
 
-# Load .env reliably
-dotenv_path = find_dotenv(filename=".env", usecwd=True)
-if not dotenv_path:
-    dotenv_path = str((Path(__file__).parent / ".env").resolve())
-load_dotenv(dotenv_path=dotenv_path, override=True)
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://www.exposureshield.com",
+    "https://exposureshield.com",
+]
 
-HIBP_API_KEY = os.getenv("HIBP_API_KEY", "").strip()
-USER_AGENT = "ExposureShield/0.5.4 (contact@exposureshield.com)"
+app = FastAPI(title="ExposureShield API", version="0.2.0")
 
-app = FastAPI()
-APP_VERSION = "v0.5.4"
-START_TS = time.time()
-
-# CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://www.exposureshield.com","https://exposureshield.com","http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["GET","POST","OPTIONS"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# 5-minute cache
-verify_cache = TTLCache(maxsize=100, ttl=300)
+class ScanRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class ScanResponse(BaseModel):
+    result: str
+    email: EmailStr
+    status: str
+    advice: Optional[List[str]] = None
+    has_exposure: Optional[bool] = None
+    breaches: Optional[List[dict]] = None
+
+class VerifyResponse(BaseModel):
+    verified: bool
+    breaches: List[dict]
 
 @app.get("/health")
 def health():
+    return {"status": "ok", "service": "exposureshield-api", "version": app.version}
+
+# OPTIONS handlers (some proxies are picky; this makes preflight always return 204)
+@app.options("/scan")
+def scan_preflight():
+    return Response(status_code=204)
+
+@app.options("/verify")
+def verify_preflight():
+    return Response(status_code=204)
+
+# Accept BOTH JSON and form-encoded bodies for /scan
+@app.post("/scan", response_model=ScanResponse)
+async def scan(request: Request):
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        data = await request.json()
+        sr = ScanRequest(**data)
+    else:
+        form = await request.form()
+        sr = ScanRequest(email=form.get("email", ""), password=form.get("password", ""))
+
+    advice = [
+        "Turn on 2FA for your email.",
+        "Update weak/reused passwords.",
+        "Use a password manager.",
+    ]
+
+    demo_exposure = any(s in sr.email.lower() for s in ["eric", "test", "demo"])
+
     return {
-        "status": "ok",
-        "service": "exposureshield-api",
-        "store": "sqlite",
-        "version": APP_VERSION,
-        "uptime_sec": round(time.time() - START_TS, 1),
-        "has_hibp_key": bool(HIBP_API_KEY)
+        "result": "success",
+        "email": sr.email,
+        "status": "demo",
+        "advice": advice,
+        "has_exposure": demo_exposure,
+        "breaches": [{"title": "Deezer", "domain": "deezer.com", "date": "2019-04-22", "data_classes": ["Email addresses", "Passwords"]}] if demo_exposure else [],
     }
 
-@app.get("/verify")
-def verify(email: str = Query(..., min_length=3, max_length=254)):
-    if email in verify_cache:
-        return {"verified": bool(verify_cache[email]), "breaches": verify_cache[email]}
-
-    if not HIBP_API_KEY:
-        raise HTTPException(status_code=500, detail="HIBP key not configured")
-
-    url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
-    headers = {"hibp-api-key": HIBP_API_KEY, "User-Agent": USER_AGENT, "Accept": "application/json"}
-
-    try:
-        with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
-            r = client.get(url, headers=headers, params={"truncateResponse":"false"})
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Upstream error: {str(e)}")
-
-    print(f"[HIBP] status={r.status_code} body={r.text[:120]}", file=sys.stderr)
-
-    if r.status_code == 200:
-        data = r.json()
-        breaches = [{"name": b.get("Name"), "domain": b.get("Domain")} for b in data]
-        verify_cache[email] = breaches
-        return {"verified": True, "breaches": breaches}
-    elif r.status_code == 404:
-        verify_cache[email] = []
-        return {"verified": False, "breaches": []}
-    elif r.status_code == 429:
-        raise HTTPException(status_code=429, detail="Rate limited by HIBP")
-    elif r.status_code in (401, 403):
-        raise HTTPException(status_code=502, detail="HIBP authentication failed (check API key/plan).")
+@app.get("/verify", response_model=VerifyResponse)
+async def verify(email: EmailStr):
+    has_exposure = "eric" in email.lower()
+    if has_exposure:
+        breaches = [
+            {
+                "name": "Deezer",
+                "title": "Deezer",
+                "domain": "deezer.com",
+                "date": "2019-04-22",
+                "verified": True,
+                "pwn_count": 229_037_936,
+                "data_classes": ["Email addresses", "Passwords"],
+            },
+            {
+                "name": "Canva",
+                "title": "Canva",
+                "domain": "canva.com",
+                "date": "2019-05-24",
+                "verified": True,
+                "pwn_count": 139_000_000,
+                "data_classes": ["Email addresses", "Names", "Passwords"],
+            },
+        ]
     else:
-        raise HTTPException(status_code=502, detail=f"HIBP error {r.status_code}")
+        breaches = []
+    return {"verified": True, "breaches": breaches}
+
+# ---------- Feedback (captcha + rate-limit) ----------
+SECRET = os.getenv("FEEDBACK_SECRET", "dev-secret-change-me")
+CAPTCHA_TTL_SEC = 180
+RATE_LIMIT_WINDOW_SEC = 60
+RATE_LIMIT_MAX = 3
+
+recent: Dict[str, Deque[datetime]] = {}
+
+def sign_token(a: int, b: int, ts: int) -> str:
+    msg = f"{a}:{b}:{ts}".encode()
+    return hmac.new(SECRET.encode(), msg, hashlib.sha256).hexdigest()
+
+def verify_token(a: int, b: int, ts: int, tok: str) -> bool:
+    if abs(int(datetime.utcnow().timestamp()) - ts) > CAPTCHA_TTL_SEC:
+        return False
+    return hmac.compare_digest(sign_token(a, b, ts), tok)
+
+@app.get("/feedback/captcha")
+def feedback_captcha():
+    from random import randint
+    a, b = randint(2, 9), randint(2, 9)
+    ts = int(datetime.utcnow().timestamp())
+    token = sign_token(a, b, ts)
+    return {"a": a, "b": b, "ts": ts, "token": token}
+
+class FeedbackIn(BaseModel):
+    email: EmailStr
+    message: str
+    a: int
+    b: int
+    ts: int
+    token: str
+    answer: int
+
+@app.post("/feedback")
+async def feedback(req: Request, payload: FeedbackIn):
+    ip = req.headers.get("x-forwarded-for", "").split(",")[0].strip() or (req.client.host if req.client else "unknown")
+    now = datetime.utcnow()
+    dq = recent.setdefault(ip, deque())
+    cutoff = now - timedelta(seconds=RATE_LIMIT_WINDOW_SEC)
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    if len(dq) >= RATE_LIMIT_MAX:
+        raise HTTPException(status_code=429, detail="Too many requests, try again later.")
+    dq.append(now)
+
+    if not verify_token(payload.a, payload.b, payload.ts, payload.token):
+        raise HTTPException(status_code=400, detail="Captcha expired/invalid.")
+    if payload.answer != (payload.a + payload.b):
+        raise HTTPException(status_code=400, detail="Captcha answer incorrect.")
+
+    print(f"[FEEDBACK] {payload.email}: {payload.message}")
+    return JSONResponse({"ok": True, "received": True})
