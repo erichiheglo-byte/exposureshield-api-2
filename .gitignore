@@ -17,3 +17,15 @@ Thumbs.db
 # Env files
 .env
 .env.*
+# Backups & temp
+*.bak
+*.backup-*.py
+~*
+
+# Logs & runtime artifacts
+logs/
+uvicorn*.log
+
+# Local venv
+.venv/
+Start-API-Logged.ps1
