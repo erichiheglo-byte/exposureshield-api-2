@@ -1,12 +1,11 @@
 ﻿services:
   - type: web
-    name: exposureshield-api-3
+    name: exposureshield-api-4
     env: python
     plan: free
-    runtime: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     autoDeploy: true
     envVars:
       - key: FEEDBACK_SECRET
-        sync: false   # set value in the dashboard
+        sync: false
